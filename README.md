@@ -147,6 +147,13 @@ npx shadcn-ui@latest add [component-name]
 
 問題が発生した場合は、GitHubのIssueを作成するか、開発チームまでお問い合わせください。
 
+## デプロイ
+
+このプロジェクトはVercelでのデプロイに最適化されています。
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/haudi-development/iot-noise-monitoring-system)
+
 ## 更新履歴
 
+- v1.0.1 (2024/08/26) - Vercelデプロイ設定を追加
 - v1.0.0 (2024/08/26) - 初回リリース

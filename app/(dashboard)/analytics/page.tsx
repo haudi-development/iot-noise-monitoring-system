@@ -33,7 +33,6 @@ import {
   TrendingUp,
   Download,
   Activity,
-  Wifi,
   Filter,
   Check,
   X,
@@ -71,6 +70,9 @@ export default function AnalyticsPage() {
   const [realReadings, setRealReadings] = useState<DeviceReadingDTO[]>([])
 
   const realDevices = useMemo(() => realReadings.map(mapReadingToDevice), [realReadings])
+  const dummyDevices = data.devices
+  const allDevices = useMemo(() => [...dummyDevices, ...realDevices], [dummyDevices, realDevices])
+  const realDeviceIdSet = useMemo(() => new Set(realDevices.map(device => device.deviceId)), [realDevices])
 
   useEffect(() => {
     let cancelled = false
@@ -99,9 +101,10 @@ export default function AnalyticsPage() {
   }, [])
 
   // フィルター対象のデバイスを取得（初期は空）
-  const filteredDevices = selectedDevices.length > 0 
-    ? data.devices.filter(d => selectedDevices.includes(d.deviceId))
-    : []
+  const filteredDevices = useMemo(() => {
+    if (selectedDevices.length === 0) return []
+    return allDevices.filter(device => selectedDevices.includes(device.deviceId))
+  }, [allDevices, selectedDevices])
 
   const handleDateChange = (start: Date, end: Date) => {
     setStartDate(start)
@@ -110,7 +113,7 @@ export default function AnalyticsPage() {
 
   // 物件単位でデバイスを選択/解除
   const handlePropertyToggle = (propertyId: string) => {
-    const propertyDevices = data.devices.filter(d => d.propertyId === propertyId)
+    const propertyDevices = dummyDevices.filter(d => d.propertyId === propertyId)
     const propertyDeviceIds = propertyDevices.map(d => d.deviceId)
     const isAllSelected = propertyDeviceIds.every(id => selectedDevices.includes(id))
     
@@ -124,14 +127,13 @@ export default function AnalyticsPage() {
     }
   }
 
-  // 時間間隔に基づいてデータポイントを生成
-  const getTimeSeriesData = () => {
+  const timeSeriesData = useMemo(() => {
     const hours = differenceInHours(endDate, startDate)
     const minutes = differenceInMinutes(endDate, startDate)
-    
+
     let intervals: Date[] = []
     let timeFormat = 'HH:mm'
-    
+
     if (minutes <= 60) {
       intervals = eachMinuteOfInterval({ start: startDate, end: endDate }, { step: 5 })
       timeFormat = 'HH:mm'
@@ -146,49 +148,106 @@ export default function AnalyticsPage() {
       timeFormat = 'MM/dd'
     }
 
-    return intervals.map(date => {
-      const dataPoint: any = {
-        time: format(date, timeFormat)
+    const dataMap = new Map<string, any>()
+    const ensureEntry = (date: Date) => {
+      const key = format(date, timeFormat)
+      let entry = dataMap.get(key)
+      if (!entry) {
+        entry = { time: key, __timestamp: date }
+        dataMap.set(key, entry)
+      }
+      return entry
+    }
+
+    const dummySelected = filteredDevices.filter(device => !realDeviceIdSet.has(device.deviceId))
+    const realSelected = filteredDevices.filter(device => realDeviceIdSet.has(device.deviceId))
+
+    if (graphMode === 'actual') {
+      if (dummySelected.length > 0) {
+        intervals.forEach(date => {
+          const entry = ensureEntry(date)
+          dummySelected.forEach(device => {
+            const baseNoise = device.currentNoiseLevel
+            const variation = Math.sin(date.getHours() / 4) * 5 + (Math.random() - 0.5) * 10
+            entry[`device_${device.deviceId}`] = Math.round((baseNoise + variation) * 10) / 10
+          })
+        })
       }
 
-      if (graphMode === 'actual') {
-        // 実測モード：各デバイスの個別データ
-        filteredDevices.forEach((device, index) => {
-          const baseNoise = device.currentNoiseLevel
-          const variation = Math.sin(date.getHours() / 4) * 5 + (Math.random() - 0.5) * 10
-          dataPoint[`device_${device.deviceId}`] = Math.round((baseNoise + variation) * 10) / 10
+      if (realSelected.length > 0) {
+        const readingsInRange = realReadings.filter(reading => {
+          const recordedAt = new Date(reading.recordedAt)
+          if (recordedAt < startDate || recordedAt > endDate) return false
+          return selectedDevices.length === 0 || selectedDevices.includes(reading.deviceId)
         })
-      } else if (graphMode === 'average') {
-        // 平均モード：選択デバイスの平均値
-        if (filteredDevices.length > 0) {
-          const deviceNoises = filteredDevices.map(d => {
-            const baseNoise = d.currentNoiseLevel
+
+        readingsInRange.forEach(reading => {
+          const recordedAt = new Date(reading.recordedAt)
+          const entry = ensureEntry(recordedAt)
+          entry[`device_${reading.deviceId}`] = Math.round(reading.noiseLevel * 10) / 10
+        })
+      }
+    } else if (graphMode === 'average') {
+      intervals.forEach(date => {
+        const entry = ensureEntry(date)
+        entry.__values = []
+        if (dummySelected.length > 0) {
+          const deviceNoises = dummySelected.map(device => {
+            const baseNoise = device.currentNoiseLevel
             const variation = Math.sin(date.getHours() / 4) * 5 + (Math.random() - 0.5) * 10
             return baseNoise + variation
           })
-          const avgNoise = deviceNoises.reduce((a, b) => a + b, 0) / deviceNoises.length
-          dataPoint.average = Math.round(avgNoise * 10) / 10
-        } else {
-          dataPoint.average = 0
+          entry.__values.push(...deviceNoises)
         }
-      } else if (graphMode === 'alerts') {
-        // アラートモード：デバイス別のアラート数（カテゴリごと）
-        filteredDevices.slice(0, 10).forEach(device => {
-          selectedAlertCategories.forEach(category => {
-            const key = `${device.roomNumber}_${category}`
-            if (category === 'critical') dataPoint[key] = Math.floor(Math.random() * 2)
-            else if (category === 'high') dataPoint[key] = Math.floor(Math.random() * 3)
-            else if (category === 'medium') dataPoint[key] = Math.floor(Math.random() * 4)
-            else if (category === 'low') dataPoint[key] = Math.floor(Math.random() * 5)
-          })
+      })
+
+      if (realSelected.length > 0) {
+        const readingsInRange = realReadings.filter(reading => {
+          const recordedAt = new Date(reading.recordedAt)
+          if (recordedAt < startDate || recordedAt > endDate) return false
+          return selectedDevices.length === 0 || selectedDevices.includes(reading.deviceId)
+        })
+
+        readingsInRange.forEach(reading => {
+          const recordedAt = new Date(reading.recordedAt)
+          const entry = ensureEntry(recordedAt)
+          if (!entry.__values) entry.__values = []
+          entry.__values.push(reading.noiseLevel)
         })
       }
 
-      return dataPoint
-    })
-  }
+      dataMap.forEach(entry => {
+        if (entry.__values && entry.__values.length > 0) {
+          const avg = entry.__values.reduce((a: number, b: number) => a + b, 0) / entry.__values.length
+          entry.average = Math.round(avg * 10) / 10
+        } else {
+          entry.average = 0
+        }
+        delete entry.__values
+      })
+    } else if (graphMode === 'alerts') {
+      intervals.forEach(date => {
+        const entry = ensureEntry(date)
+        const dummyForAlerts = dummySelected.length > 0 ? dummySelected : dummyDevices.slice(0, 10)
+        dummyForAlerts.slice(0, 10).forEach(device => {
+          selectedAlertCategories.forEach(category => {
+            const key = `${device.roomNumber}_${category}`
+            if (category === 'critical') entry[key] = Math.floor(Math.random() * 2)
+            else if (category === 'high') entry[key] = Math.floor(Math.random() * 3)
+            else if (category === 'medium') entry[key] = Math.floor(Math.random() * 4)
+            else if (category === 'low') entry[key] = Math.floor(Math.random() * 5)
+          })
+        })
+      })
+    }
 
-  const timeSeriesData = getTimeSeriesData()
+    return Array.from(dataMap.values())
+      .sort((a, b) => a.__timestamp.getTime() - b.__timestamp.getTime())
+      .map(entry => {
+        const { __timestamp, ...rest } = entry
+        return rest
+      })
+  }, [graphMode, startDate, endDate, filteredDevices, realDeviceIdSet, realReadings, selectedDevices, selectedAlertCategories, dummyDevices])
 
   const alertsByPriority = [
     { name: '緊急', value: data.alerts.filter(a => a.priority === 'critical').length, color: '#ef4444' },
@@ -206,29 +265,6 @@ export default function AnalyticsPage() {
     { metric: '誤検知率', value: 95, fullMark: 100 },
     { metric: 'システム安定性', value: 88, fullMark: 100 }
   ]
-
-  const realSummary = useMemo(() => {
-    if (realReadings.length === 0) {
-      return {
-        count: 0,
-        avg: null as number | null,
-        maxEntry: null as DeviceReadingDTO | null,
-      }
-    }
-
-    const avg = realReadings.reduce((sum, item) => sum + item.noiseLevel, 0) / realReadings.length
-    const maxEntry = realReadings.reduce((prev, curr) => {
-      const prevLevel = prev?.noiseMax ?? prev?.noiseLevel ?? 0
-      const currLevel = curr.noiseMax ?? curr.noiseLevel
-      return currLevel > prevLevel ? curr : prev
-    })
-
-    return {
-      count: realReadings.length,
-      avg,
-      maxEntry,
-    }
-  }, [realReadings])
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
@@ -409,83 +445,6 @@ export default function AnalyticsPage() {
         <h1 className="text-3xl font-bold">データ分析</h1>
         <p className="text-muted-foreground">騒音データとアラートの詳細分析</p>
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Wifi className="h-5 w-5" />
-              実機データサマリー
-            </CardTitle>
-            <CardDescription>最新受信分から算出した実測統計</CardDescription>
-          </CardHeader>
-          <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <p className="text-xs text-muted-foreground">受信デバイス</p>
-              <p className="text-2xl font-semibold">{realSummary.count}</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">平均騒音</p>
-              <p className="text-2xl font-semibold">
-                {realSummary.avg !== null ? `${realSummary.avg.toFixed(1)} dB` : '---'}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">最大騒音</p>
-              <p className="text-2xl font-semibold">
-                {realSummary.maxEntry
-                  ? `${(realSummary.maxEntry.noiseMax ?? realSummary.maxEntry.noiseLevel).toFixed(1)} dB`
-                  : '---'}
-              </p>
-              {realSummary.maxEntry && (
-                <p className="text-xs text-muted-foreground mt-1">
-                  {realSummary.maxEntry.deviceId}
-                </p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Activity className="h-5 w-5" />
-              最新実機ログ
-            </CardTitle>
-            <CardDescription>直近 5 件の受信データ</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {realReadings.length === 0 ? (
-              <p className="text-sm text-muted-foreground">実機からのデータがまだありません。</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-xs text-muted-foreground">
-                      <th className="p-2 text-left">受信</th>
-                      <th className="p-2 text-left">デバイスID</th>
-                      <th className="p-2 text-left">騒音</th>
-                      <th className="p-2 text-left">最大</th>
-                      <th className="p-2 text-left">温度</th>
-                      <th className="p-2 text-left">湿度</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {realReadings.slice(0, 5).map((reading, index) => (
-                      <tr key={`${reading.deviceId}-${reading.receivedAt}-${index}`} className="border-b last:border-none">
-                        <td className="p-2 whitespace-nowrap">{format(new Date(reading.receivedAt), 'MM/dd HH:mm:ss', { locale: ja })}</td>
-                        <td className="p-2">{reading.deviceId}</td>
-                        <td className="p-2">{reading.noiseLevel.toFixed(1)} dB</td>
-                        <td className="p-2">{reading.noiseMax !== undefined ? `${reading.noiseMax.toFixed(1)} dB` : '-'}</td>
-                        <td className="p-2">{reading.temperature !== undefined ? `${reading.temperature.toFixed(1)}℃` : '-'}</td>
-                        <td className="p-2">{reading.humidity !== undefined ? `${reading.humidity.toFixed(0)}%` : '-'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
         <div className="flex gap-2">
           <Button variant="outline">
             <Download className="h-4 w-4 mr-2" />
@@ -519,7 +478,7 @@ export default function AnalyticsPage() {
                   <Button 
                     size="sm" 
                     variant="ghost"
-                    onClick={() => setSelectedDevices(data.devices.map(d => d.deviceId))}
+                    onClick={() => setSelectedDevices(allDevices.map(d => d.deviceId))}
                   >
                     全選択
                   </Button>
@@ -542,7 +501,7 @@ export default function AnalyticsPage() {
               
               <div className="space-y-4">
                 {data.properties.slice(0, 5).map(property => {
-                  const propertyDevices = data.devices.filter(d => d.propertyId === property.id)
+                  const propertyDevices = dummyDevices.filter(d => d.propertyId === property.id)
                   const propertyDeviceIds = propertyDevices.map(d => d.deviceId)
                   const selectedCount = propertyDevices.filter(d => selectedDevices.includes(d.deviceId)).length
                   const isAllSelected = propertyDeviceIds.every(id => selectedDevices.includes(id))
@@ -599,6 +558,45 @@ export default function AnalyticsPage() {
                     </div>
                   )
                 })}
+                {realDevices.length > 0 && (
+                  <div className="pt-4">
+                    <p className="text-xs font-medium text-muted-foreground mb-2">実機デバイス</p>
+                    <div className="grid grid-cols-1 gap-1">
+                      {realDevices.map(device => {
+                        const checked = selectedDevices.includes(device.deviceId)
+                        return (
+                          <label
+                            key={device.deviceId}
+                            className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-gray-50 text-sm"
+                          >
+                            <span className="flex items-center gap-2">
+                              <span className={`inline-block h-2 w-2 rounded-full ${
+                                device.status === 'online' ? 'bg-green-500' :
+                                device.status === 'warning' ? 'bg-yellow-500' :
+                                'bg-red-500'
+                              }`} />
+                              {device.deviceId}
+                            </span>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                const isChecked = e.target.checked
+                                setSelectedDevices(prev => {
+                                  if (isChecked) {
+                                    return Array.from(new Set([...prev, device.deviceId]))
+                                  }
+                                  return prev.filter(id => id !== device.deviceId)
+                                })
+                              }}
+                              className="rounded"
+                            />
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

@@ -48,6 +48,7 @@ export interface Device {
   status: 'online' | 'offline' | 'warning'
   lastCommunication: Date
   currentNoiseLevel: number
+  currentNoiseMax?: number
   thresholds: {
     normal: { min: number; max: number }
     night: { min: number; max: number }
@@ -89,6 +90,7 @@ export interface DeviceReadingThresholds {
 export interface DeviceReading {
   deviceId: string
   noiseLevel: number
+  noiseMax?: number
   recordedAt: Date
   receivedAt: Date
   batteryLevel?: number
@@ -103,6 +105,7 @@ export interface DeviceReading {
 export interface DeviceReadingInput {
   deviceId: string
   noiseLevel: number
+  noiseMax?: number
   recordedAt?: string
   batteryLevel?: number
   temperature?: number

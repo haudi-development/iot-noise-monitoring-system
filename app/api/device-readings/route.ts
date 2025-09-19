@@ -32,6 +32,7 @@ const readingSchema = z.object({
   deviceId: z.string().min(1),
   recordedAt: z.string().datetime().optional(),
   noiseLevel: z.number().min(0).max(150),
+  noiseMax: z.number().min(0).max(150).optional(),
   batteryLevel: z.number().min(0).max(100).optional(),
   temperature: z.number().optional(),
   humidity: z.number().min(0).max(100).optional(),
@@ -50,6 +51,7 @@ interface SupabaseReadingRow {
   recorded_at: string
   received_at: string
   noise_level: number
+  noise_max?: number | null
   battery_level?: number | null
   temperature?: number | null
   humidity?: number | null
@@ -64,6 +66,7 @@ function serialiseReading(reading: DeviceReading) {
   return {
     deviceId: reading.deviceId,
     noiseLevel: reading.noiseLevel,
+    noiseMax: reading.noiseMax,
     recordedAt: reading.recordedAt.toISOString(),
     receivedAt: reading.receivedAt.toISOString(),
     batteryLevel: reading.batteryLevel,
@@ -80,6 +83,7 @@ function mapRowToReading(row: SupabaseReadingRow): DeviceReading {
   return {
     deviceId: row.device_id,
     noiseLevel: row.noise_level,
+    noiseMax: row.noise_max ?? undefined,
     recordedAt: new Date(row.recorded_at),
     receivedAt: new Date(row.received_at),
     batteryLevel: row.battery_level ?? undefined,
@@ -139,24 +143,30 @@ export async function POST(request: NextRequest) {
     }, { status: 400 })
   }
 
+  const parsed = {
+    ...result.data,
+    noiseMax: result.data.noiseMax ?? result.data.noiseLevel,
+  }
+
   const supabase = getSupabaseServiceClient()
 
   if (supabase) {
     const now = new Date()
-    const recordedAt = result.data.recordedAt ? new Date(result.data.recordedAt) : now
+    const recordedAt = parsed.recordedAt ? new Date(parsed.recordedAt) : now
 
     const insertPayload = {
-      device_id: result.data.deviceId,
-      noise_level: result.data.noiseLevel,
+      device_id: parsed.deviceId,
+      noise_level: parsed.noiseLevel,
+      noise_max: parsed.noiseMax,
       recorded_at: recordedAt.toISOString(),
       received_at: now.toISOString(),
-      battery_level: result.data.batteryLevel ?? null,
-      temperature: result.data.temperature ?? null,
-      humidity: result.data.humidity ?? null,
-      status: result.data.status ?? null,
-      metadata: result.data.metadata ?? null,
-      thresholds: result.data.thresholds ?? null,
-      payload: result.data.payload ?? null,
+      battery_level: parsed.batteryLevel ?? null,
+      temperature: parsed.temperature ?? null,
+      humidity: parsed.humidity ?? null,
+      status: parsed.status ?? null,
+      metadata: parsed.metadata ?? null,
+      thresholds: parsed.thresholds ?? null,
+      payload: parsed.payload ?? null,
     }
 
     const { data, error } = await supabase
@@ -176,7 +186,7 @@ export async function POST(request: NextRequest) {
     const reading = mapRowToReading(data as SupabaseReadingRow)
 
     // 併せてローカルキャッシュを更新（バックアップ用途）
-    deviceStore.addReading(result.data)
+    deviceStore.addReading(parsed)
 
     return NextResponse.json({
       message: "reading accepted",
@@ -184,7 +194,7 @@ export async function POST(request: NextRequest) {
     }, { status: 201 })
   }
 
-  const reading = deviceStore.addReading(result.data)
+  const reading = deviceStore.addReading(parsed)
 
   return NextResponse.json({
     message: "reading accepted",

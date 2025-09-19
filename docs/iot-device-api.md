@@ -16,6 +16,7 @@ create table if not exists public.device_readings (
   recorded_at timestamptz not null,
   received_at timestamptz not null,
   noise_level numeric(6,2) not null,
+  noise_max numeric(6,2) not null,
   battery_level numeric,
   temperature numeric,
   humidity numeric,
@@ -26,6 +27,16 @@ create table if not exists public.device_readings (
   created_at timestamptz not null default timezone('utc', now())
 );
 
+alter table public.device_readings
+  add column if not exists noise_max numeric(6,2);
+
+update public.device_readings
+  set noise_max = coalesce(noise_max, noise_level)
+  where noise_max is null;
+
+alter table public.device_readings
+  alter column noise_max set not null;
+
 create index if not exists idx_device_readings_device_recorded
   on public.device_readings (device_id, recorded_at desc);
 
@@ -34,7 +45,7 @@ create index if not exists idx_device_readings_recorded
 
 alter table public.device_readings enable row level security;
 
-create policy if not exists "device_readings_service_role"
+create policy "device_readings_service_role"
   on public.device_readings
   using (auth.role() = 'service_role')
   with check (auth.role() = 'service_role');
@@ -81,7 +92,8 @@ X-API-Key: <YOUR_KEY>      # DEVICE_API_KEY を設定している場合のみ必
 | フィールド | 型 | 必須 | 説明 |
 | --- | --- | --- | --- |
 | `deviceId` | string | ✔ | デバイス識別子（例: `ALSOK-PROTOTYPE-01`） |
-| `noiseLevel` | number | ✔ | 騒音レベル (dB)。0〜150 の範囲。 |
+| `noiseLevel` | number | ✔ | 平均または瞬間の騒音レベル (dB)。0〜150 の範囲。 |
+| `noiseMax` | number | ✔ | 直近 15 秒で観測した最大騒音レベル (dB)。0〜150 の範囲。 |
 | `recordedAt` | string (ISO8601) |  | センサー計測時刻。未指定の場合は受信時刻を利用。 |
 | `batteryLevel` | number |  | バッテリー残量 (%)。0〜100。 |
 | `temperature` | number |  | 温度 (℃)。 |
@@ -107,6 +119,7 @@ curl -X POST http://localhost:3000/api/device-readings \
     "deviceId": "ALSOK-PROTOTYPE-01",
     "recordedAt": "2024-09-01T12:34:56.000Z",
     "noiseLevel": 64.2,
+    "noiseMax": 72.8,
     "batteryLevel": 82,
     "temperature": 23.5,
     "humidity": 48,
@@ -127,6 +140,8 @@ curl -X POST http://localhost:3000/api/device-readings \
   "reading": {
     "deviceId": "ALSOK-PROTOTYPE-01",
     "noiseLevel": 64.2,
+    "noiseMax": 72.8,
+    "noiseMax": 72.8,
     "recordedAt": "2024-09-01T12:34:56.000Z",
     "receivedAt": "2024-09-01T12:35:01.123Z",
     "batteryLevel": 82,
@@ -166,6 +181,7 @@ curl http://localhost:3000/api/device-readings
     {
       "deviceId": "ALSOK-PROTOTYPE-01",
       "noiseLevel": 62.8,
+      "noiseMax": 70.1,
       "recordedAt": "2024-09-01T12:36:11.000Z",
       "receivedAt": "2024-09-01T12:36:11.745Z",
       "batteryLevel": 81,
@@ -197,12 +213,14 @@ curl "http://localhost:3000/api/device-readings?deviceId=ALSOK-PROTOTYPE-01&limi
     {
       "deviceId": "ALSOK-PROTOTYPE-01",
       "noiseLevel": 63.1,
+      "noiseMax": 73.4,
       "recordedAt": "2024-09-01T12:36:26.000Z",
       "receivedAt": "2024-09-01T12:36:26.712Z"
     },
     {
       "deviceId": "ALSOK-PROTOTYPE-01",
       "noiseLevel": 62.8,
+      "noiseMax": 71.0,
       "recordedAt": "2024-09-01T12:36:11.000Z",
       "receivedAt": "2024-09-01T12:36:11.745Z"
     }

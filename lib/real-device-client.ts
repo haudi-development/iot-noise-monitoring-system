@@ -3,6 +3,7 @@ import { Device } from "@/lib/types"
 export interface DeviceReadingDTO {
   deviceId: string
   noiseLevel: number
+  noiseMax?: number
   recordedAt: string
   receivedAt: string
   batteryLevel?: number
@@ -81,6 +82,9 @@ export function mapReadingToDevice(reading: DeviceReadingDTO): Device {
     status,
     lastCommunication: receivedAt,
     currentNoiseLevel: Math.round(reading.noiseLevel * 10) / 10,
+    currentNoiseMax: reading.noiseMax !== undefined
+      ? Math.round(reading.noiseMax * 10) / 10
+      : Math.round(reading.noiseLevel * 10) / 10,
     thresholds,
   }
 }

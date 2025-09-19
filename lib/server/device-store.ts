@@ -15,6 +15,7 @@ class DeviceStore {
     const reading: DeviceReading = {
       deviceId: input.deviceId,
       noiseLevel: input.noiseLevel,
+      noiseMax: input.noiseMax ?? input.noiseLevel,
       recordedAt,
       receivedAt: now,
       batteryLevel: input.batteryLevel,

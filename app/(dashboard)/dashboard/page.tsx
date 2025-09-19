@@ -197,6 +197,9 @@ export default function DashboardPage() {
                 <div>
                   <span className="text-xs text-muted-foreground block">騒音レベル</span>
                   <span className="text-2xl font-bold text-alsok-blue">{latestRealDevice.currentNoiseLevel.toFixed(1)} dB</span>
+                  {latestRealReading?.noiseMax !== undefined && (
+                    <span className="text-xs text-muted-foreground block">最大 {latestRealReading.noiseMax.toFixed(1)} dB</span>
+                  )}
                 </div>
                 {latestRealReading.temperature !== undefined && (
                   <div>

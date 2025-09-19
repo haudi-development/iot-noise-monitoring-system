@@ -9,6 +9,7 @@ Options:
   --base-url <url>        API のベース URL（デフォルト: http://localhost:3000）
   --device-id <id>        デバイスID（デフォルト: ALSOK-PROTOTYPE-01）
   --noise-level <number>  騒音レベル (dB)。未指定なら 30〜95 の乱数
+  --noise-max <number>    直近 15 秒の最大騒音レベル (dB)
   --battery <number>      バッテリー残量 (%)
   --temperature <number>  温度 (℃)
   --humidity <number>     湿度 (%)
@@ -70,9 +71,18 @@ async function sendReading(options) {
     ? toNumber(options.noiseLevel, 'noise-level')
     : Math.round((Math.random() * 65 + 30) * 10) / 10
 
+  let noiseMax = options.noiseMax !== undefined
+    ? toNumber(options.noiseMax, 'noise-max')
+    : Math.round((noiseLevel + Math.random() * 8) * 10) / 10
+
+  if (noiseMax < noiseLevel) {
+    noiseMax = noiseLevel
+  }
+
   const payload = {
     deviceId: options.deviceId || 'ALSOK-PROTOTYPE-01',
     noiseLevel,
+    noiseMax,
     recordedAt: new Date().toISOString(),
     batteryLevel: toNumber(options.battery, 'battery'),
     temperature: toNumber(options.temperature, 'temperature'),

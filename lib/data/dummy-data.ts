@@ -112,6 +112,9 @@ export function generateDevices(count: number = 100, rooms: Room[], properties: 
     const property = properties.find(p => p.id === room.propertyId)
     const status = statuses[Math.random() < 0.8 ? 0 : Math.random() < 0.5 ? 2 : 1]
     
+    const currentNoiseLevel = Math.round((Math.random() * 60 + 30) * 10) / 10
+    const currentNoiseMax = Math.min(110, currentNoiseLevel + Math.round(Math.random() * 10))
+
     devices.push({
       id: `device-${i + 1}`,
       deviceId: `IOT-${String(i + 1).padStart(6, '0')}`,
@@ -123,7 +126,8 @@ export function generateDevices(count: number = 100, rooms: Room[], properties: 
       lastCommunication: status === 'online' 
         ? subMinutes(new Date(), Math.floor(Math.random() * 15))
         : subHours(new Date(), Math.floor(Math.random() * 24) + 1),
-      currentNoiseLevel: Math.round((Math.random() * 60 + 30) * 10) / 10,
+      currentNoiseLevel,
+      currentNoiseMax,
       thresholds: {
         normal: { min: 30, max: 70 },
         night: { min: 30, max: 55 },
@@ -204,6 +208,9 @@ export function getRealtimeNoiseLevels(devices: Device[]): Device[] {
     ...device,
     currentNoiseLevel: device.status === 'online' 
       ? Math.round(Math.max(30, Math.min(110, device.currentNoiseLevel + (Math.random() - 0.5) * 10)) * 10) / 10
-      : device.currentNoiseLevel
+      : device.currentNoiseLevel,
+    currentNoiseMax: device.status === 'online'
+      ? Math.min(110, Math.max(device.currentNoiseLevel, (device.currentNoiseMax ?? device.currentNoiseLevel) + Math.random() * 5 - 1))
+      : device.currentNoiseMax
   }))
 }

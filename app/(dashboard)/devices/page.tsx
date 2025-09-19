@@ -254,18 +254,23 @@ export default function DevicesPage() {
                         </span>
                       </td>
                       <td className="p-2 align-top">
-                        <div className={`flex items-center ${getNoiseLevelColor(device.currentNoiseLevel)}`}>
-                          <Volume2 className="h-4 w-4 mr-1" />
-                          <span className="font-medium">{device.currentNoiseLevel.toFixed(1)} dB</span>
-                          {device.status === 'online' && (
-                            <Activity className="h-3 w-3 ml-1 text-green-500" />
-                          )}
+                      <div className={`flex items-center ${getNoiseLevelColor(device.currentNoiseLevel)}`}>
+                        <Volume2 className="h-4 w-4 mr-1" />
+                        <span className="font-medium">{device.currentNoiseLevel.toFixed(1)} dB</span>
+                        {device.status === 'online' && (
+                          <Activity className="h-3 w-3 ml-1 text-green-500" />
+                        )}
+                      </div>
+                      {(reading?.noiseMax ?? device.currentNoiseMax) !== undefined && (
+                        <div className="text-xs text-muted-foreground">
+                          最大 {(reading?.noiseMax ?? device.currentNoiseMax)?.toFixed(1)} dB
                         </div>
-                        {reading && (
-                          <div className="mt-1 space-x-2 text-xs text-muted-foreground">
-                            {reading.temperature !== undefined && (
-                              <span>温度 {reading.temperature.toFixed(1)}℃</span>
-                            )}
+                      )}
+                      {reading && (
+                        <div className="mt-1 space-x-2 text-xs text-muted-foreground">
+                          {reading.temperature !== undefined && (
+                            <span>温度 {reading.temperature.toFixed(1)}℃</span>
+                          )}
                             {reading.humidity !== undefined && (
                               <span>湿度 {reading.humidity.toFixed(0)}%</span>
                             )}

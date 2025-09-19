@@ -1,10 +1,11 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { getDummyData, getRealtimeNoiseLevels } from '@/lib/data/dummy-data'
+import { fetchLatestDeviceReadings, mapReadingToDevice, DeviceReadingDTO } from '@/lib/real-device-client'
 import { format } from 'date-fns'
 import { ja } from 'date-fns/locale'
 import {
@@ -23,16 +24,53 @@ import {
 
 export default function DevicesPage() {
   const data = getDummyData()
-  const [devices, setDevices] = useState(data.devices)
+  const [dummyDevices, setDummyDevices] = useState(data.devices)
+  const [realReadings, setRealReadings] = useState<DeviceReadingDTO[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [filterStatus, setFilterStatus] = useState<'all' | 'online' | 'offline' | 'warning'>('all')
 
+  const realDevices = useMemo(() => realReadings.map(mapReadingToDevice), [realReadings])
+  const devices = useMemo(() => [...dummyDevices, ...realDevices], [dummyDevices, realDevices])
+  const realReadingLookup = useMemo(() => {
+    const map = new Map<string, DeviceReadingDTO>()
+    realReadings.forEach(reading => {
+      map.set(reading.deviceId, reading)
+    })
+    return map
+  }, [realReadings])
+
   useEffect(() => {
     const interval = setInterval(() => {
-      setDevices(prev => getRealtimeNoiseLevels(prev))
+      setDummyDevices(prev => getRealtimeNoiseLevels(prev))
     }, 15000)
 
     return () => clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const load = async () => {
+      try {
+        const readings = await fetchLatestDeviceReadings()
+        const sorted = [...readings].sort((a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())
+        if (!cancelled) {
+          setRealReadings(sorted)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('リアルデバイスデータの取得に失敗しました', error)
+        }
+      }
+    }
+
+    load()
+    const interval = setInterval(load, 15000)
+
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
   }, [])
 
   const filteredDevices = devices.filter(device => {
@@ -44,12 +82,12 @@ export default function DevicesPage() {
     return matchesSearch && matchesStatus
   })
 
-  const stats = {
+  const stats = useMemo(() => ({
     online: devices.filter(d => d.status === 'online').length,
     offline: devices.filter(d => d.status === 'offline').length,
     warning: devices.filter(d => d.status === 'warning').length,
     total: devices.length
-  }
+  }), [devices])
 
   const getStatusColor = (status: string) => {
     switch(status) {
@@ -180,48 +218,84 @@ export default function DevicesPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredDevices.map(device => (
-                  <tr key={device.id} className="border-b hover:bg-gray-50">
-                    <td className="p-2">
-                      <div className="font-medium">{device.deviceId}</div>
-                    </td>
-                    <td className="p-2">
-                      <div className="text-sm">{device.propertyName}</div>
-                    </td>
-                    <td className="p-2">
-                      <div className="flex items-center text-sm">
-                        <MapPin className="h-3 w-3 mr-1" />
-                        {device.location}
-                      </div>
-                    </td>
-                    <td className="p-2">
-                      <span className={`px-2 py-1 rounded-full text-xs ${getStatusColor(device.status)}`}>
-                        {device.status === 'online' ? 'オンライン' :
-                         device.status === 'offline' ? 'オフライン' : '警告'}
-                      </span>
-                    </td>
-                    <td className="p-2">
-                      <div className={`flex items-center ${getNoiseLevelColor(device.currentNoiseLevel)}`}>
-                        <Volume2 className="h-4 w-4 mr-1" />
-                        <span className="font-medium">{device.currentNoiseLevel.toFixed(1)} dB</span>
-                        {device.status === 'online' && (
-                          <Activity className="h-3 w-3 ml-1 text-green-500" />
+                {filteredDevices.map(device => {
+                  const reading = realReadingLookup.get(device.deviceId)
+                  const isRealDevice = Boolean(reading)
+                  const recordedAt = reading ? new Date(reading.recordedAt) : null
+
+                  return (
+                    <tr key={device.id} className="border-b hover:bg-gray-50">
+                      <td className="p-2 align-top">
+                        <div className="font-medium">{device.deviceId}</div>
+                        {isRealDevice && (
+                          <span className="mt-1 inline-block rounded-full bg-alsok-blue/15 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-alsok-blue">
+                            実機デバイス
+                          </span>
                         )}
-                      </div>
-                    </td>
-                    <td className="p-2">
-                      <div className="flex items-center text-sm text-muted-foreground">
-                        <Clock className="h-3 w-3 mr-1" />
-                        {format(device.lastCommunication, 'HH:mm', { locale: ja })}
-                      </div>
-                    </td>
-                    <td className="p-2">
-                      <Button size="sm" variant="outline">
-                        <Settings className="h-4 w-4" />
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="p-2 align-top">
+                        <div className="text-sm">{device.propertyName}</div>
+                      </td>
+                      <td className="p-2 align-top">
+                        <div className="flex items-center text-sm">
+                          <MapPin className="h-3 w-3 mr-1" />
+                          {device.location}
+                        </div>
+                        {reading?.metadata?.notes && (
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {reading.metadata.notes}
+                          </div>
+                        )}
+                      </td>
+                      <td className="p-2 align-top">
+                        <span className={`px-2 py-1 rounded-full text-xs ${getStatusColor(device.status)}`}>
+                          {device.status === 'online' ? 'オンライン' :
+                           device.status === 'offline' ? 'オフライン' : '警告'}
+                        </span>
+                      </td>
+                      <td className="p-2 align-top">
+                        <div className={`flex items-center ${getNoiseLevelColor(device.currentNoiseLevel)}`}>
+                          <Volume2 className="h-4 w-4 mr-1" />
+                          <span className="font-medium">{device.currentNoiseLevel.toFixed(1)} dB</span>
+                          {device.status === 'online' && (
+                            <Activity className="h-3 w-3 ml-1 text-green-500" />
+                          )}
+                        </div>
+                        {reading && (
+                          <div className="mt-1 space-x-2 text-xs text-muted-foreground">
+                            {reading.temperature !== undefined && (
+                              <span>温度 {reading.temperature.toFixed(1)}℃</span>
+                            )}
+                            {reading.humidity !== undefined && (
+                              <span>湿度 {reading.humidity.toFixed(0)}%</span>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                      <td className="p-2 align-top">
+                        <div className="flex items-center text-sm text-muted-foreground">
+                          <Clock className="h-3 w-3 mr-1" />
+                          {format(device.lastCommunication, 'HH:mm', { locale: ja })}
+                        </div>
+                        {recordedAt && (
+                          <div className="text-xs text-muted-foreground">
+                            計測 {format(recordedAt, 'HH:mm:ss', { locale: ja })}
+                          </div>
+                        )}
+                        {reading?.batteryLevel !== undefined && (
+                          <div className="text-xs text-muted-foreground">
+                            バッテリー {reading.batteryLevel.toFixed(0)}%
+                          </div>
+                        )}
+                      </td>
+                      <td className="p-2 align-top">
+                        <Button size="sm" variant="outline">
+                          <Settings className="h-4 w-4" />
+                        </Button>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

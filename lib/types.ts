@@ -70,3 +70,45 @@ export interface Alert {
 }
 
 export type Priority = 'low' | 'medium' | 'high' | 'critical'
+
+export interface DeviceReadingMetadata {
+  propertyId?: string
+  propertyName?: string
+  roomNumber?: string
+  location?: string
+  floor?: number
+  notes?: string
+}
+
+export interface DeviceReadingThresholds {
+  normal?: { min?: number; max?: number }
+  night?: { min?: number; max?: number }
+  holiday?: { min?: number; max?: number }
+}
+
+export interface DeviceReading {
+  deviceId: string
+  noiseLevel: number
+  recordedAt: Date
+  receivedAt: Date
+  batteryLevel?: number
+  temperature?: number
+  humidity?: number
+  status?: 'online' | 'offline' | 'warning'
+  metadata?: DeviceReadingMetadata
+  thresholds?: DeviceReadingThresholds
+  payload?: Record<string, unknown>
+}
+
+export interface DeviceReadingInput {
+  deviceId: string
+  noiseLevel: number
+  recordedAt?: string
+  batteryLevel?: number
+  temperature?: number
+  humidity?: number
+  status?: 'online' | 'offline' | 'warning'
+  metadata?: DeviceReadingMetadata
+  thresholds?: DeviceReadingThresholds
+  payload?: Record<string, unknown>
+}

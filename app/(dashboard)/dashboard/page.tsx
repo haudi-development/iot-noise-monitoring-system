@@ -1,8 +1,9 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { getDummyData, getRealtimeNoiseLevels } from '@/lib/data/dummy-data'
+import { fetchLatestDeviceReadings, mapReadingToDevice, DeviceReadingDTO } from '@/lib/real-device-client'
 import { format } from 'date-fns'
 import { ja } from 'date-fns/locale'
 import {
@@ -31,15 +32,44 @@ import {
 } from 'recharts'
 
 export default function DashboardPage() {
-  const [data, setData] = useState(getDummyData())
-  const [devices, setDevices] = useState(data.devices)
+  const data = useMemo(() => getDummyData(), [])
+  const [dummyDevices, setDummyDevices] = useState(data.devices)
+  const [realReadings, setRealReadings] = useState<DeviceReadingDTO[]>([])
+  const realDevices = useMemo(() => realReadings.map(mapReadingToDevice), [realReadings])
+  const devices = useMemo(() => [...dummyDevices, ...realDevices], [dummyDevices, realDevices])
 
   useEffect(() => {
     const interval = setInterval(() => {
-      setDevices(prev => getRealtimeNoiseLevels(prev))
+      setDummyDevices(prev => getRealtimeNoiseLevels(prev))
     }, 15000)
 
     return () => clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const load = async () => {
+      try {
+        const readings = await fetchLatestDeviceReadings()
+        const sorted = [...readings].sort((a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())
+        if (!cancelled) {
+          setRealReadings(sorted)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('リアルデバイスデータの取得に失敗しました', error)
+        }
+      }
+    }
+
+    load()
+    const interval = setInterval(load, 15000)
+
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
   }, [])
 
   const todayAlerts = data.alerts.filter(
@@ -47,10 +77,18 @@ export default function DashboardPage() {
   )
   
   const activeDevices = devices.filter(d => d.status === 'online')
-  const averageNoiseLevel = (
-    activeDevices.reduce((acc, d) => acc + d.currentNoiseLevel, 0) / activeDevices.length
-  ).toFixed(1)
+  const averageNoiseLevel = activeDevices.length > 0
+    ? (activeDevices.reduce((acc, d) => acc + d.currentNoiseLevel, 0) / activeDevices.length).toFixed(1)
+    : '---'
   const pendingAlerts = data.alerts.filter(a => a.status === 'new')
+  const totalDevices = devices.length
+  const activeDeviceRatio = totalDevices > 0
+    ? Math.round((activeDevices.length / totalDevices) * 100)
+    : 0
+  const latestRealReading = realReadings.length > 0 ? realReadings[0] : null
+  const latestRealDevice = latestRealReading
+    ? realDevices.find(device => device.deviceId === latestRealReading.deviceId) ?? null
+    : null
 
   const companyAlertData = data.companies.map(company => {
     const companyProperties = data.properties.filter(p => p.companyId === company.id)
@@ -106,9 +144,9 @@ export default function DashboardPage() {
             <Wifi className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{activeDevices.length}/{devices.length}</div>
+            <div className="text-2xl font-bold">{activeDevices.length}/{totalDevices}</div>
             <p className="text-xs text-muted-foreground">
-              稼働率 {Math.round(activeDevices.length / devices.length * 100)}%
+              稼働率 {totalDevices > 0 ? `${activeDeviceRatio}%` : '---'}
             </p>
           </CardContent>
         </Card>
@@ -119,9 +157,9 @@ export default function DashboardPage() {
             <Volume2 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{averageNoiseLevel} dB</div>
+            <div className="text-2xl font-bold">{averageNoiseLevel}{averageNoiseLevel !== '---' ? ' dB' : ''}</div>
             <p className="text-xs text-muted-foreground">
-              正常範囲内
+              {averageNoiseLevel === '---' ? '最新データなし' : '正常範囲内'}
             </p>
           </CardContent>
         </Card>
@@ -139,6 +177,56 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="border border-alsok-blue/30 bg-white/80">
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <div>
+            <CardTitle className="text-sm font-medium text-alsok-blue">実機デバイスモニター</CardTitle>
+            <p className="text-xs text-muted-foreground">15秒周期のプロトタイプ計測値</p>
+          </div>
+          <Wifi className="h-4 w-4 text-alsok-blue" />
+        </CardHeader>
+        <CardContent>
+          {latestRealReading && latestRealDevice ? (
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-sm font-semibold">{latestRealDevice.propertyName} / {latestRealDevice.roomNumber}</p>
+                <p className="text-xs text-muted-foreground">{latestRealDevice.location}</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-4 text-sm">
+                <div>
+                  <span className="text-xs text-muted-foreground block">騒音レベル</span>
+                  <span className="text-2xl font-bold text-alsok-blue">{latestRealDevice.currentNoiseLevel.toFixed(1)} dB</span>
+                </div>
+                {latestRealReading.temperature !== undefined && (
+                  <div>
+                    <span className="text-xs text-muted-foreground block">温度</span>
+                    <span className="text-lg font-semibold">{latestRealReading.temperature.toFixed(1)}℃</span>
+                  </div>
+                )}
+                {latestRealReading.humidity !== undefined && (
+                  <div>
+                    <span className="text-xs text-muted-foreground block">湿度</span>
+                    <span className="text-lg font-semibold">{latestRealReading.humidity.toFixed(0)}%</span>
+                  </div>
+                )}
+                {latestRealReading.batteryLevel !== undefined && (
+                  <div>
+                    <span className="text-xs text-muted-foreground block">バッテリー</span>
+                    <span className="text-lg font-semibold">{latestRealReading.batteryLevel.toFixed(0)}%</span>
+                  </div>
+                )}
+              </div>
+              <div className="text-xs text-muted-foreground md:text-right">
+                <div>受信: {format(new Date(latestRealReading.receivedAt), 'HH:mm:ss', { locale: ja })}</div>
+                <div>計測: {format(new Date(latestRealReading.recordedAt), 'HH:mm:ss', { locale: ja })}</div>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">実機デバイスからの最新データを待機しています...</p>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>

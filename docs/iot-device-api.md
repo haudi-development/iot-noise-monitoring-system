@@ -49,6 +49,23 @@ create policy "device_readings_service_role"
   on public.device_readings
   using (auth.role() = 'service_role')
   with check (auth.role() = 'service_role');
+
+create table if not exists public.system_settings (
+  key text primary key,
+  value jsonb not null,
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+alter table public.system_settings enable row level security;
+
+create policy "system_settings_service_role"
+  on public.system_settings
+  using (auth.role() = 'service_role')
+  with check (auth.role() = 'service_role');
+
+insert into public.system_settings (key, value)
+  values ('device_ingest_enabled', jsonb_build_object('enabled', true))
+  on conflict (key) do nothing;
 ```
 
 3. Vercel（およびローカル開発の `.env.local`）に以下の環境変数を設定します。
@@ -57,6 +74,7 @@ create policy "device_readings_service_role"
 SUPABASE_URL=<Project URL>
 SUPABASE_SERVICE_ROLE_KEY=<service_role キー>
 DEVICE_API_KEY=<任意のデバイス用APIキー（任意）>
+# DEVICE_INGEST_ENABLED=false  # Supabase 未接続時のフォールバック用（省略時は true）
 ```
 
 4. 実機デバイスからは従来どおり `/api/device-readings` に POST すれば Supabase に蓄積されます。UI は 15 秒周期のポーリングで最新値を取得します。
@@ -69,6 +87,8 @@ DEVICE_API_KEY=<任意のデバイス用APIキー（任意）>
 | `POST` | `/api/device-readings` | デバイスから最新の測定値を送信 |
 | `GET` | `/api/device-readings` | すべてのデバイスの最新値一覧を取得 |
 | `GET` | `/api/device-readings?deviceId=xxx&limit=100` | 特定デバイスの履歴取得（最大 500 件、デフォルト 100 件） |
+| `GET` | `/api/device-ingest` | デバイスデータ受信の有効/無効状態を取得 |
+| `POST` | `/api/device-ingest` | 受信状態の更新（backend 管理用） |
 
 ## 認証
 
@@ -163,6 +183,7 @@ curl -X POST http://localhost:3000/api/device-readings \
 | --- | --- |
 | `400` | JSON 解析・バリデーションエラー。`details` にフィールド単位の情報を返却。 |
 | `401` | API キーが無効、または未指定。 |
+| `503` | データ受信が一時停止中。ダッシュボードの設定で再開が必要。 |
 
 ## `GET /api/device-readings`
 
@@ -234,3 +255,10 @@ curl "http://localhost:3000/api/device-readings?deviceId=ALSOK-PROTOTYPE-01&limi
 - フロントエンドは 15 秒間隔で `GET /api/device-readings` をポーリングし、ダッシュボードとデバイス一覧に反映しています。
 - 実機を増やす場合は、`deviceId` ごとにデータが分離されます。UI 側は配列をそのままマージするため、同じ API を複数台で共用可能です。
 - 将来的に Supabase 以外のストレージへ移行したい場合は、`app/api/device-readings/route.ts` 内で Supabase クライアントを差し替えることで対応できます。
+
+## `GET / POST /api/device-ingest`
+
+- デバイスデータ受信のオン/オフを制御するための管理用エンドポイントです（ダッシュボードの設定画面で利用）。
+- `GET` は `{ "enabled": true | false }` を返します。
+- `POST` は `{ "enabled": true | false }` を受け取り、`system_settings` テーブルの `device_ingest_enabled` を更新します。
+- 受信がオフの場合、`POST /api/device-readings` は `503 ingest_disabled` を返し、新しいデータは Supabase に保存されません。

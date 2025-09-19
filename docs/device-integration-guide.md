@@ -105,6 +105,7 @@ curl -X POST https://iot-noise-monitoring-system.vercel.app/api/device-readings 
 | `201 Created` | 受領し Supabase に保存済み | レスポンスに保存内容が含まれます |
 | `400 Bad Request` | JSON 解析・バリデーション失敗 | `details` にフィールドエラーが入ります |
 | `401 Unauthorized` | API キー不一致または未指定 | `X-API-Key` / `Authorization` ヘッダーを確認 |
+| `503 Service Unavailable` | サーバーの受信が一時停止中 | ダッシュボードの設定→デバイス受信をオンにする |
 | `500 Internal Server Error` | Supabase などバックエンド側での保存失敗 | サーバーログを確認してください |
 
 ## 5. 動作スケジュール

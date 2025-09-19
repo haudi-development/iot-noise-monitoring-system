@@ -1,12 +1,60 @@
 "use client"
 
+"use client"
+
+import { useEffect, useState } from "react"
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Settings, Bell, Shield, Database, Wifi, Globe } from 'lucide-react'
+import { Switch } from "@/components/ui/switch"
+import { Settings, Bell, Shield, Database, Wifi, Globe, AlertTriangle } from 'lucide-react'
 
 export default function SettingsPage() {
+  const [ingestEnabled, setIngestEnabled] = useState<boolean | null>(null)
+  const [isUpdating, setIsUpdating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const res = await fetch('/api/device-ingest', { cache: 'no-store' })
+        if (!res.ok) throw new Error('failed')
+        const data = await res.json()
+        setIngestEnabled(Boolean(data.enabled))
+      } catch (err) {
+        console.error('Failed to load ingest status', err)
+        setError('受信設定の取得に失敗しました')
+      }
+    }
+    load()
+  }, [])
+
+  const toggleIngest = async (enabled: boolean) => {
+    setIsUpdating(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/device-ingest', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ enabled }),
+      })
+      if (!res.ok) {
+        throw new Error(`Failed with status ${res.status}`)
+      }
+      const data = await res.json()
+      setIngestEnabled(Boolean(data.enabled))
+    } catch (err) {
+      console.error('Failed to update ingest status', err)
+      setError('受信設定の更新に失敗しました')
+    } finally {
+      setIsUpdating(false)
+    }
+  }
+
   return (
     <div className="p-6 space-y-6">
       <div>
@@ -15,6 +63,42 @@ export default function SettingsPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Wifi className="h-5 w-5" />
+              デバイス受信設定
+            </CardTitle>
+            <CardDescription>
+              実機からの計測データを受け付けるかどうかを制御します
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">データ受信</p>
+                <p className="text-xs text-muted-foreground">
+                  オフにするとAPIは503を返し、新しいデータは保存されません。
+                </p>
+              </div>
+              <Switch
+                checked={Boolean(ingestEnabled)}
+                onCheckedChange={(checked) => toggleIngest(checked)}
+                disabled={ingestEnabled === null || isUpdating}
+              />
+            </div>
+            {error && (
+              <div className="flex items-center gap-2 rounded-md bg-red-50 p-3 text-xs text-red-700">
+                <AlertTriangle className="h-4 w-4" />
+                {error}
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">
+              現在の状態: {ingestEnabled === null ? '読み込み中...' : ingestEnabled ? '受信中' : '停止中'}
+            </p>
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">

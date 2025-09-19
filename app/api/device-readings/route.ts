@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { z } from "zod"
 
 import { deviceStore } from "@/lib/server/device-store"
+import { getDeviceIngestEnabled } from "@/lib/server/device-ingest"
 import { getSupabaseServiceClient } from "@/lib/server/supabase"
 import { DeviceReading } from "@/lib/types"
 
@@ -117,6 +118,14 @@ function isUnauthorised(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const ingestEnabled = await getDeviceIngestEnabled()
+  if (!ingestEnabled) {
+    return NextResponse.json({
+      error: "ingest_disabled",
+      message: "Device data ingestion is currently disabled",
+    }, { status: 503 })
+  }
+
   if (isUnauthorised(request)) {
     return NextResponse.json({
       error: "unauthorised",

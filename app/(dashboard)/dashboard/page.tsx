@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useMemo } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { getDummyData, getRealtimeNoiseLevels } from '@/lib/data/dummy-data'
 import { fetchLatestDeviceReadings, mapReadingToDevice, DeviceReadingDTO } from '@/lib/real-device-client'
 import { format } from 'date-fns'
@@ -227,6 +227,48 @@ export default function DashboardPage() {
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">実機デバイスからの最新データを待機しています...</p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Activity className="h-5 w-5" />
+            最新受信データ
+          </CardTitle>
+          <CardDescription>直近5件の実機計測ログ</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {realReadings.length === 0 ? (
+            <p className="text-sm text-muted-foreground">まだ実機からのデータがありません。</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-xs text-muted-foreground">
+                    <th className="p-2 text-left">受信時刻</th>
+                    <th className="p-2 text-left">デバイスID</th>
+                    <th className="p-2 text-left">騒音レベル</th>
+                    <th className="p-2 text-left">最大</th>
+                    <th className="p-2 text-left">温度</th>
+                    <th className="p-2 text-left">湿度</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {realReadings.slice(0, 5).map((reading, index) => (
+                    <tr key={`${reading.deviceId}-${reading.receivedAt}-${index}`} className="border-b last:border-none">
+                      <td className="p-2 whitespace-nowrap">{format(new Date(reading.receivedAt), 'MM/dd HH:mm:ss', { locale: ja })}</td>
+                      <td className="p-2">{reading.deviceId}</td>
+                      <td className="p-2">{reading.noiseLevel.toFixed(1)} dB</td>
+                      <td className="p-2">{reading.noiseMax !== undefined ? `${reading.noiseMax.toFixed(1)} dB` : '-'}</td>
+                      <td className="p-2">{reading.temperature !== undefined ? `${reading.temperature.toFixed(1)}℃` : '-'}</td>
+                      <td className="p-2">{reading.humidity !== undefined ? `${reading.humidity.toFixed(0)}%` : '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </CardContent>
       </Card>

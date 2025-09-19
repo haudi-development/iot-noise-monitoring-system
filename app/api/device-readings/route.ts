@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { z } from "zod"
 
 import { deviceStore } from "@/lib/server/device-store"
+import { getSupabaseServiceClient } from "@/lib/server/supabase"
 import { DeviceReading } from "@/lib/types"
 
 export const dynamic = "force-dynamic"
@@ -41,6 +42,23 @@ const readingSchema = z.object({
 })
 
 const API_KEY_HEADER = "x-api-key"
+const SUPABASE_TABLE = "device_readings"
+
+interface SupabaseReadingRow {
+  id: string
+  device_id: string
+  recorded_at: string
+  received_at: string
+  noise_level: number
+  battery_level?: number | null
+  temperature?: number | null
+  humidity?: number | null
+  status?: string | null
+  metadata?: Record<string, unknown> | null
+  thresholds?: Record<string, unknown> | null
+  payload?: Record<string, unknown> | null
+  created_at?: string
+}
 
 function serialiseReading(reading: DeviceReading) {
   return {
@@ -55,6 +73,22 @@ function serialiseReading(reading: DeviceReading) {
     metadata: reading.metadata,
     thresholds: reading.thresholds,
     payload: reading.payload,
+  }
+}
+
+function mapRowToReading(row: SupabaseReadingRow): DeviceReading {
+  return {
+    deviceId: row.device_id,
+    noiseLevel: row.noise_level,
+    recordedAt: new Date(row.recorded_at),
+    receivedAt: new Date(row.received_at),
+    batteryLevel: row.battery_level ?? undefined,
+    temperature: row.temperature ?? undefined,
+    humidity: row.humidity ?? undefined,
+    status: (row.status as DeviceReading["status"]) ?? undefined,
+    metadata: (row.metadata as DeviceReading["metadata"]) ?? undefined,
+    thresholds: (row.thresholds as DeviceReading["thresholds"]) ?? undefined,
+    payload: (row.payload as DeviceReading["payload"]) ?? undefined,
   }
 }
 
@@ -105,6 +139,51 @@ export async function POST(request: NextRequest) {
     }, { status: 400 })
   }
 
+  const supabase = getSupabaseServiceClient()
+
+  if (supabase) {
+    const now = new Date()
+    const recordedAt = result.data.recordedAt ? new Date(result.data.recordedAt) : now
+
+    const insertPayload = {
+      device_id: result.data.deviceId,
+      noise_level: result.data.noiseLevel,
+      recorded_at: recordedAt.toISOString(),
+      received_at: now.toISOString(),
+      battery_level: result.data.batteryLevel ?? null,
+      temperature: result.data.temperature ?? null,
+      humidity: result.data.humidity ?? null,
+      status: result.data.status ?? null,
+      metadata: result.data.metadata ?? null,
+      thresholds: result.data.thresholds ?? null,
+      payload: result.data.payload ?? null,
+    }
+
+    const { data, error } = await supabase
+      .from(SUPABASE_TABLE)
+      .insert(insertPayload)
+      .select()
+      .single()
+
+    if (error || !data) {
+      console.error("Failed to insert device reading", error)
+      return NextResponse.json({
+        error: "storage_error",
+        message: "Failed to persist device reading",
+      }, { status: 500 })
+    }
+
+    const reading = mapRowToReading(data as SupabaseReadingRow)
+
+    // 併せてローカルキャッシュを更新（バックアップ用途）
+    deviceStore.addReading(result.data)
+
+    return NextResponse.json({
+      message: "reading accepted",
+      reading: serialiseReading(reading),
+    }, { status: 201 })
+  }
+
   const reading = deviceStore.addReading(result.data)
 
   return NextResponse.json({
@@ -123,6 +202,57 @@ export async function GET(request: NextRequest) {
     if (!Number.isFinite(parsed)) return undefined
     return Math.max(1, Math.min(500, Math.floor(parsed)))
   })()
+
+  const supabase = getSupabaseServiceClient()
+
+  if (supabase) {
+    if (deviceId) {
+      const { data, error } = await supabase
+        .from(SUPABASE_TABLE)
+        .select("*")
+        .eq("device_id", deviceId)
+        .order("recorded_at", { ascending: false })
+        .limit(limit ?? 100)
+
+      if (error) {
+        console.error("Failed to fetch device history", error)
+        return NextResponse.json({
+          error: "storage_error",
+          message: "Failed to load device history",
+        }, { status: 500 })
+      }
+
+      const readings = (data ?? [])
+        .map((row) => mapRowToReading(row as SupabaseReadingRow))
+        .map(serialiseReading)
+      return NextResponse.json({ deviceId, readings })
+    }
+
+    const { data, error } = await supabase
+      .from(SUPABASE_TABLE)
+      .select("*")
+      .order("recorded_at", { ascending: false })
+      .limit(500)
+
+    if (error) {
+      console.error("Failed to fetch latest readings", error)
+      return NextResponse.json({
+        error: "storage_error",
+        message: "Failed to load latest readings",
+      }, { status: 500 })
+    }
+
+    const latestMap = new Map<string, DeviceReading>()
+    for (const row of data ?? []) {
+      if (!latestMap.has(row.device_id)) {
+        latestMap.set(row.device_id, mapRowToReading(row as SupabaseReadingRow))
+      }
+    }
+
+    return NextResponse.json({
+      devices: Array.from(latestMap.values()).map(serialiseReading),
+    })
+  }
 
   if (deviceId) {
     const history = deviceStore.getHistory(deviceId, limit)

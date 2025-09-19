@@ -1,6 +1,54 @@
 # IoTデバイス連携 API 仕様
 
-ALSOK IoT騒音監視システムの Web 管理画面と、試作 IoT デバイス（15 秒周期）を連携させるためのモック API 仕様です。現状は Next.js の API Routes 上で動作するインメモリ実装であり、サーバー再起動で蓄積データはリセットされます。
+ALSOK IoT騒音監視システムの Web 管理画面と、試作 IoT デバイス（15 秒周期）を連携させるための API 仕様です。Vercel・本番環境では Supabase をストレージとして利用し、ローカル開発で Supabase 環境変数が未設定の場合は従来どおりインメモリ実装が自動的にフォールバックします。
+
+## Supabase セットアップ
+
+1. Supabase プロジェクトを作成し、`Project API keys` から `Project URL` と `service_role` キーを控えます。
+2. SQL エディタで以下を実行し、計測データ用テーブルを作成します。
+
+```sql
+create extension if not exists "pgcrypto";
+
+create table if not exists public.device_readings (
+  id uuid primary key default gen_random_uuid(),
+  device_id text not null,
+  recorded_at timestamptz not null,
+  received_at timestamptz not null,
+  noise_level numeric(6,2) not null,
+  battery_level numeric,
+  temperature numeric,
+  humidity numeric,
+  status text,
+  metadata jsonb,
+  thresholds jsonb,
+  payload jsonb,
+  created_at timestamptz not null default timezone('utc', now())
+);
+
+create index if not exists idx_device_readings_device_recorded
+  on public.device_readings (device_id, recorded_at desc);
+
+create index if not exists idx_device_readings_recorded
+  on public.device_readings (recorded_at desc);
+
+alter table public.device_readings enable row level security;
+
+create policy if not exists "device_readings_service_role"
+  on public.device_readings
+  using (auth.role() = 'service_role')
+  with check (auth.role() = 'service_role');
+```
+
+3. Vercel（およびローカル開発の `.env.local`）に以下の環境変数を設定します。
+
+```
+SUPABASE_URL=<Project URL>
+SUPABASE_SERVICE_ROLE_KEY=<service_role キー>
+DEVICE_API_KEY=<任意のデバイス用APIキー（任意）>
+```
+
+4. 実機デバイスからは従来どおり `/api/device-readings` に POST すれば Supabase に蓄積されます。UI は 15 秒周期のポーリングで最新値を取得します。
 
 ## エンドポイント
 
@@ -163,7 +211,7 @@ curl "http://localhost:3000/api/device-readings?deviceId=ALSOK-PROTOTYPE-01&limi
 
 ## 運用メモ
 
-- 本実装は開発用モックです。データはプロセス内に保持され、Vercel などのサーバーレス環境ではリクエスト単位でリセットされる点に注意してください。
+- Supabase の環境変数が未設定の場合は既存のインメモリ実装が利用されます（ローカル開発用）。
 - フロントエンドは 15 秒間隔で `GET /api/device-readings` をポーリングし、ダッシュボードとデバイス一覧に反映しています。
 - 実機を増やす場合は、`deviceId` ごとにデータが分離されます。UI 側は配列をそのままマージするため、同じ API を複数台で共用可能です。
-- 将来的に永続化（例: データベース、キュー）を導入したら、`lib/server/device-store.ts` を差し替えることで API 表面はそのまま利用できます。
+- 将来的に Supabase 以外のストレージへ移行したい場合は、`app/api/device-readings/route.ts` 内で Supabase クライアントを差し替えることで対応できます。

@@ -49,6 +49,7 @@ DEVICE_API_KEY=<任意のデバイス用APIキー（任意）>
 ```
 
 4. 実機デバイスからは従来どおり `/api/device-readings` に POST すれば Supabase に蓄積されます。UI は 15 秒周期のポーリングで最新値を取得します。
+   - `DEVICE_API_KEY` を設定した場合、必ずリクエストヘッダーに `X-API-Key: <DEVICE_API_KEY>` もしくは `Authorization: Bearer <DEVICE_API_KEY>` を付与してください。キーが一致しない場合は 401 が返却されます。
 
 ## エンドポイント
 

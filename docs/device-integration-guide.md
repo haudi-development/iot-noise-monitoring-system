@@ -124,4 +124,25 @@ curl -X POST https://iot-noise-monitoring-system.vercel.app/api/device-readings 
 ### Q. Supabase に登録されたデータはどこで確認できますか？
 - Supabase ダッシュボード → `Table Editor` → `device_readings` でリアルタイムに確認可能です。
 
+## 8. 動作確認用スクリプト
+
+アプリ内に簡易送信用スクリプト `scripts/send-device-reading.mjs` を用意しています。開発中に手動でデータを投げたい場合に利用してください。
+
+1. `.env.local` やシェルで `DEVICE_API_KEY` と `DEVICE_BASE_URL`（必要なら）を設定
+2. コマンドを実行
+
+```bash
+npm run send-reading -- \
+  --base-url https://iot-noise-monitoring-system.vercel.app \
+  --device-id ALSOK-PROTOTYPE-01 \
+  --noise-level 62.5 \
+  --battery 78 \
+  --temperature 23.4 \
+  --humidity 45
+```
+
+- オプションを省略すると乱数（noiseLevel など）で送信されます。
+- `--count` と `--interval` を指定すると複数回連続送信が可能です。例: `--count 4 --interval 5000`
+- `--api-key` オプションで、環境変数ではなくコマンドライン側に直接キーを指定することもできます。
+
 以上です。ご不明点は開発チームまで問い合わせください。

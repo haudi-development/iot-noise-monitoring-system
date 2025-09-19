@@ -135,9 +135,6 @@ export async function GET(request: NextRequest) {
   const latest = deviceStore.getLatestAll()
 
   return NextResponse.json({
-    devices: latest.map(({ deviceId: id, latest }) => ({
-      deviceId: id,
-      ...serialiseReading(latest),
-    })),
+    devices: latest.map(({ latest }) => serialiseReading(latest)),
   })
 }

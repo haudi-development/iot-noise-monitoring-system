@@ -221,10 +221,11 @@ curl http://localhost:3000/api/device-readings
 ### 履歴取得
 
 ```
-curl "http://localhost:3000/api/device-readings?deviceId=ALSOK-PROTOTYPE-01&limit=200"
+curl "http://localhost:3000/api/device-readings?deviceId=ALSOK-PROTOTYPE-01&limit=200&start=2025-09-18T00:00:00Z&end=2025-09-19T00:00:00Z"
 ```
 
 - `limit` は 1〜500 で指定可能。未指定時は 100 件を返却。
+- `start` / `end` を ISO8601 で指定すると `recorded_at` の期間フィルタがかかります。
 - 最新順（降順）で配列を返します。
 
 ```json

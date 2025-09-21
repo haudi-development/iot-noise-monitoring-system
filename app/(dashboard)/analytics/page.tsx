@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button"
 import { DateRangePicker } from "@/components/ui/date-range-picker"
 import { getDummyData } from '@/lib/data/dummy-data'
-import { fetchLatestDeviceReadings, mapReadingToDevice, DeviceReadingDTO } from '@/lib/real-device-client'
+import { fetchLatestDeviceReadings, fetchDeviceHistory, mapReadingToDevice, DeviceReadingDTO } from '@/lib/real-device-client'
 import { format, subHours, differenceInHours, differenceInMinutes, eachHourOfInterval, eachDayOfInterval, eachMinuteOfInterval } from 'date-fns'
 import { ja } from 'date-fns/locale'
 import {
@@ -68,11 +68,18 @@ export default function AnalyticsPage() {
   const [selectedAlertCategories, setSelectedAlertCategories] = useState<string[]>(['critical', 'high', 'medium', 'low'])
   const [showAlertFilter, setShowAlertFilter] = useState(false)
   const [realReadings, setRealReadings] = useState<DeviceReadingDTO[]>([])
+  const [realHistoryMap, setRealHistoryMap] = useState<Record<string, DeviceReadingDTO[]>>({})
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false)
+  const [historyError, setHistoryError] = useState<string | null>(null)
 
   const realDevices = useMemo(() => realReadings.map(mapReadingToDevice), [realReadings])
   const dummyDevices = data.devices
   const allDevices = useMemo(() => [...dummyDevices, ...realDevices], [dummyDevices, realDevices])
   const realDeviceIdSet = useMemo(() => new Set(realDevices.map(device => device.deviceId)), [realDevices])
+  const selectedRealDeviceIds = useMemo(() => {
+    if (selectedDevices.length === 0) return []
+    return selectedDevices.filter(id => realDeviceIdSet.has(id))
+  }, [selectedDevices, realDeviceIdSet])
 
   useEffect(() => {
     let cancelled = false
@@ -99,6 +106,53 @@ export default function AnalyticsPage() {
       clearInterval(interval)
     }
   }, [])
+
+  useEffect(() => {
+    if (selectedRealDeviceIds.length === 0) {
+      setRealHistoryMap({})
+      setHistoryError(null)
+      return
+    }
+
+    const controller = new AbortController()
+    const load = async () => {
+      setIsLoadingHistory(true)
+      setHistoryError(null)
+      try {
+        const entries = await Promise.all(selectedRealDeviceIds.map(async (deviceId) => {
+          const readings = await fetchDeviceHistory(deviceId, {
+            startDate,
+            endDate,
+            limit: 500,
+            signal: controller.signal,
+          })
+          return { deviceId, readings }
+        }))
+
+        if (!controller.signal.aborted) {
+          setRealHistoryMap(entries.reduce((acc, { deviceId, readings }) => {
+            acc[deviceId] = readings
+            return acc
+          }, {} as Record<string, DeviceReadingDTO[]>))
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.error('Failed to load device histories', error)
+          setHistoryError('実機の履歴データ取得に失敗しました')
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoadingHistory(false)
+        }
+      }
+    }
+
+    load()
+
+    return () => {
+      controller.abort()
+    }
+  }, [startDate, endDate, selectedRealDeviceIds])
 
   // フィルター対象のデバイスを取得（初期は空）
   const filteredDevices = useMemo(() => {
@@ -160,7 +214,14 @@ export default function AnalyticsPage() {
     }
 
     const dummySelected = filteredDevices.filter(device => !realDeviceIdSet.has(device.deviceId))
-    const realSelected = filteredDevices.filter(device => realDeviceIdSet.has(device.deviceId))
+    const realHistoryReadings = selectedRealDeviceIds
+      .flatMap(deviceId => realHistoryMap[deviceId] ?? [])
+      .filter(reading => {
+        const recordedAt = new Date(reading.recordedAt)
+        if (Number.isNaN(recordedAt.getTime())) return false
+        if (recordedAt < startDate || recordedAt > endDate) return false
+        return true
+      })
 
     if (graphMode === 'actual') {
       if (dummySelected.length > 0) {
@@ -174,14 +235,8 @@ export default function AnalyticsPage() {
         })
       }
 
-      if (realSelected.length > 0) {
-        const readingsInRange = realReadings.filter(reading => {
-          const recordedAt = new Date(reading.recordedAt)
-          if (recordedAt < startDate || recordedAt > endDate) return false
-          return selectedDevices.length === 0 || selectedDevices.includes(reading.deviceId)
-        })
-
-        readingsInRange.forEach(reading => {
+      if (realHistoryReadings.length > 0) {
+        realHistoryReadings.forEach(reading => {
           const recordedAt = new Date(reading.recordedAt)
           const entry = ensureEntry(recordedAt)
           entry[`device_${reading.deviceId}`] = Math.round(reading.noiseLevel * 10) / 10
@@ -201,14 +256,8 @@ export default function AnalyticsPage() {
         }
       })
 
-      if (realSelected.length > 0) {
-        const readingsInRange = realReadings.filter(reading => {
-          const recordedAt = new Date(reading.recordedAt)
-          if (recordedAt < startDate || recordedAt > endDate) return false
-          return selectedDevices.length === 0 || selectedDevices.includes(reading.deviceId)
-        })
-
-        readingsInRange.forEach(reading => {
+      if (realHistoryReadings.length > 0) {
+        realHistoryReadings.forEach(reading => {
           const recordedAt = new Date(reading.recordedAt)
           const entry = ensureEntry(recordedAt)
           if (!entry.__values) entry.__values = []
@@ -247,7 +296,7 @@ export default function AnalyticsPage() {
         const { __timestamp, ...rest } = entry
         return rest
       })
-  }, [graphMode, startDate, endDate, filteredDevices, realDeviceIdSet, realReadings, selectedDevices, selectedAlertCategories, dummyDevices])
+  }, [graphMode, startDate, endDate, filteredDevices, realDeviceIdSet, selectedRealDeviceIds, realHistoryMap, selectedAlertCategories, dummyDevices])
 
   const alertsByPriority = [
     { name: '緊急', value: data.alerts.filter(a => a.priority === 'critical').length, color: '#ef4444' },
@@ -653,6 +702,13 @@ export default function AnalyticsPage() {
           {filteredDevices.length}台のデバイスを表示中
         </div>
       </div>
+
+      {(isLoadingHistory && selectedRealDeviceIds.length > 0) && (
+        <p className="text-xs text-muted-foreground">実機デバイスの履歴データを読み込み中です...</p>
+      )}
+      {historyError && (
+        <p className="text-xs text-red-600">{historyError}</p>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card className="lg:col-span-2">

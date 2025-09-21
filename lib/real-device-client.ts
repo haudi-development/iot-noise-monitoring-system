@@ -107,3 +107,45 @@ export async function fetchLatestDeviceReadings(signal?: AbortSignal): Promise<D
   const data = await response.json()
   return Array.isArray(data.devices) ? data.devices : []
 }
+
+interface FetchHistoryOptions {
+  startDate?: Date
+  endDate?: Date
+  limit?: number
+  signal?: AbortSignal
+}
+
+export async function fetchDeviceHistory(
+  deviceId: string,
+  options: FetchHistoryOptions = {}
+): Promise<DeviceReadingDTO[]> {
+  const params = new URLSearchParams()
+  params.set('deviceId', deviceId)
+  params.set('limit', String(options.limit ?? 200))
+  if (options.startDate) {
+    params.set('start', options.startDate.toISOString())
+  }
+  if (options.endDate) {
+    params.set('end', options.endDate.toISOString())
+  }
+
+  const response = await fetch(`/api/device-readings?${params.toString()}`, {
+    method: 'GET',
+    cache: 'no-store',
+    headers: {
+      'Accept': 'application/json',
+    },
+    signal: options.signal,
+  })
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    throw new Error(`Failed to load device history (${response.status}): ${text}`)
+  }
+
+  const data = await response.json()
+  if (Array.isArray(data.readings)) {
+    return data.readings
+  }
+  return []
+}

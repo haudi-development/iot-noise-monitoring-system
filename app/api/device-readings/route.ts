@@ -221,17 +221,30 @@ export async function GET(request: NextRequest) {
     if (!Number.isFinite(parsed)) return undefined
     return Math.max(1, Math.min(500, Math.floor(parsed)))
   })()
+  const startParam = searchParams.get("start")
+  const endParam = searchParams.get("end")
+  const startDate = startParam ? new Date(startParam) : undefined
+  const endDate = endParam ? new Date(endParam) : undefined
 
   const supabase = getSupabaseServiceClient()
 
   if (supabase) {
     if (deviceId) {
-      const { data, error } = await supabase
-        .from(SUPABASE_TABLE)
-        .select("*")
-        .eq("device_id", deviceId)
-        .order("recorded_at", { ascending: false })
-        .limit(limit ?? 100)
+    let historyQuery = supabase
+      .from(SUPABASE_TABLE)
+      .select("*")
+      .eq("device_id", deviceId)
+
+    if (startDate && !Number.isNaN(startDate.getTime())) {
+      historyQuery = historyQuery.gte("recorded_at", startDate.toISOString())
+    }
+    if (endDate && !Number.isNaN(endDate.getTime())) {
+      historyQuery = historyQuery.lte("recorded_at", endDate.toISOString())
+    }
+
+    const { data, error } = await historyQuery
+      .order("recorded_at", { ascending: false })
+      .limit(limit ?? 100)
 
       if (error) {
         console.error("Failed to fetch device history", error)
@@ -275,6 +288,11 @@ export async function GET(request: NextRequest) {
 
   if (deviceId) {
     const history = deviceStore.getHistory(deviceId, limit)
+      .filter(reading => {
+        if (startDate && reading.recordedAt < startDate) return false
+        if (endDate && reading.recordedAt > endDate) return false
+        return true
+      })
     return NextResponse.json({
       deviceId,
       readings: history.map(serialiseReading),

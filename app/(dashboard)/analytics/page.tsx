@@ -58,6 +58,8 @@ const ALERT_COLORS = {
   low: '#22c55e'
 }
 
+type HistoryStatus = 'idle' | 'loading' | 'success' | 'error'
+
 export default function AnalyticsPage() {
   const data = getDummyData()
   const [startDate, setStartDate] = useState(subHours(new Date(), 24))
@@ -69,7 +71,7 @@ export default function AnalyticsPage() {
   const [showAlertFilter, setShowAlertFilter] = useState(false)
   const [realReadings, setRealReadings] = useState<DeviceReadingDTO[]>([])
   const [realHistoryMap, setRealHistoryMap] = useState<Record<string, DeviceReadingDTO[]>>({})
-  const [isLoadingHistory, setIsLoadingHistory] = useState(false)
+  const [historyStatus, setHistoryStatus] = useState<HistoryStatus>('idle')
   const [historyError, setHistoryError] = useState<string | null>(null)
 
   const realDevices = useMemo(() => realReadings.map(mapReadingToDevice), [realReadings])
@@ -80,6 +82,32 @@ export default function AnalyticsPage() {
     if (selectedDevices.length === 0) return []
     return selectedDevices.filter(id => realDeviceIdSet.has(id))
   }, [selectedDevices, realDeviceIdSet])
+
+  const historyStatusLabel = useMemo(() => {
+    switch (historyStatus) {
+      case 'loading':
+        return '実機データ同期中'
+      case 'success':
+        return '実機データ更新済み'
+      case 'error':
+        return '実機データ取得失敗'
+      default:
+        return '実機データ未選択'
+    }
+  }, [historyStatus])
+
+  const historyStatusClass = useMemo(() => {
+    switch (historyStatus) {
+      case 'loading':
+        return 'bg-blue-100 text-blue-700 border border-blue-200'
+      case 'success':
+        return 'bg-green-100 text-green-700 border border-green-200'
+      case 'error':
+        return 'bg-red-100 text-red-700 border border-red-200'
+      default:
+        return 'bg-gray-100 text-gray-600 border border-gray-200'
+    }
+  }, [historyStatus])
 
   useEffect(() => {
     let cancelled = false
@@ -111,22 +139,28 @@ export default function AnalyticsPage() {
     if (selectedRealDeviceIds.length === 0) {
       setRealHistoryMap({})
       setHistoryError(null)
+      setHistoryStatus('idle')
       return
     }
 
     const controller = new AbortController()
+    setHistoryStatus('loading')
+    setHistoryError(null)
     const load = async () => {
-      setIsLoadingHistory(true)
-      setHistoryError(null)
       try {
         const entries = await Promise.all(selectedRealDeviceIds.map(async (deviceId) => {
-          const readings = await fetchDeviceHistory(deviceId, {
-            startDate,
-            endDate,
-            limit: 500,
-            signal: controller.signal,
-          })
-          return { deviceId, readings }
+          try {
+            const readings = await fetchDeviceHistory(deviceId, {
+              startDate,
+              endDate,
+              limit: 500,
+              signal: controller.signal,
+            })
+            return { deviceId, readings }
+          } catch (error) {
+            console.warn(`Failed to load history for ${deviceId}`, error)
+            return { deviceId, readings: [] as DeviceReadingDTO[] }
+          }
         }))
 
         if (!controller.signal.aborted) {
@@ -134,15 +168,13 @@ export default function AnalyticsPage() {
             acc[deviceId] = readings
             return acc
           }, {} as Record<string, DeviceReadingDTO[]>))
+          setHistoryStatus('success')
         }
       } catch (error) {
         if (!controller.signal.aborted) {
           console.error('Failed to load device histories', error)
           setHistoryError('実機の履歴データ取得に失敗しました')
-        }
-      } finally {
-        if (!controller.signal.aborted) {
-          setIsLoadingHistory(false)
+          setHistoryStatus('error')
         }
       }
     }
@@ -770,18 +802,21 @@ export default function AnalyticsPage() {
           </div>
         )}
 
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Activity className="h-4 w-4" />
-          {filteredDevices.length}台のデバイスを表示中
+        <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+          <span className="flex items-center gap-2">
+            <Activity className="h-4 w-4" />
+            {filteredDevices.length}台のデバイスを表示中
+          </span>
+          {selectedRealDeviceIds.length > 0 && (
+            <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${historyStatusClass}`}>
+              {historyStatusLabel}
+            </span>
+          )}
         </div>
+        {historyStatus === 'error' && historyError && (
+          <p className="text-xs text-red-600">{historyError}</p>
+        )}
       </div>
-
-      {(isLoadingHistory && selectedRealDeviceIds.length > 0) && (
-        <p className="text-xs text-muted-foreground">実機デバイスの履歴データを読み込み中です...</p>
-      )}
-      {historyError && (
-        <p className="text-xs text-red-600">{historyError}</p>
-      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card className="lg:col-span-2">

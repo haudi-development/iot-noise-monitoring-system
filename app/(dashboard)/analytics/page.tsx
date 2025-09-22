@@ -64,7 +64,7 @@ export default function AnalyticsPage() {
   const [endDate, setEndDate] = useState(new Date())
   const [selectedDevices, setSelectedDevices] = useState<string[]>([])
   const [showDeviceSelector, setShowDeviceSelector] = useState(false)
-  const [graphMode, setGraphMode] = useState<'actual' | 'average' | 'alerts'>('average')
+  const [graphMode, setGraphMode] = useState<'actual' | 'average' | 'max' | 'alerts'>('average')
   const [selectedAlertCategories, setSelectedAlertCategories] = useState<string[]>(['critical', 'high', 'medium', 'low'])
   const [showAlertFilter, setShowAlertFilter] = useState(false)
   const [realReadings, setRealReadings] = useState<DeviceReadingDTO[]>([])
@@ -274,6 +274,38 @@ export default function AnalyticsPage() {
         }
         delete entry.__values
       })
+    } else if (graphMode === 'max') {
+      intervals.forEach(date => {
+        const entry = ensureEntry(date)
+        entry.__values = []
+        if (dummySelected.length > 0) {
+          const maxValues = dummySelected.map(device => {
+            const base = device.currentNoiseMax ?? device.currentNoiseLevel
+            const variation = Math.abs(Math.sin(date.getHours() / 3) * 6) + Math.random() * 3
+            return Math.round(Math.min(110, Math.max(base, device.currentNoiseLevel) + variation) * 10) / 10
+          })
+          entry.__values.push(...maxValues)
+        }
+      })
+
+      if (realHistoryReadings.length > 0) {
+        realHistoryReadings.forEach(reading => {
+          const recordedAt = new Date(reading.recordedAt)
+          const entry = ensureEntry(recordedAt)
+          if (!entry.__values) entry.__values = []
+          entry.__values.push(reading.noiseMax ?? reading.noiseLevel)
+        })
+      }
+
+      dataMap.forEach(entry => {
+        if (entry.__values && entry.__values.length > 0) {
+          const maxValue = entry.__values.reduce((acc: number, value: number) => Math.max(acc, value), -Infinity)
+          entry.max = Math.round(maxValue * 10) / 10
+        } else {
+          entry.max = 0
+        }
+        delete entry.__values
+      })
     } else if (graphMode === 'alerts') {
       intervals.forEach(date => {
         const entry = ensureEntry(date)
@@ -337,6 +369,8 @@ export default function AnalyticsPage() {
               displayName = device ? `${device.roomNumber}号室` : deviceId
             } else if (entry.name === 'average') {
               displayName = '平均値'
+            } else if (entry.name === 'max') {
+              displayName = '最大値'
             }
             
             const unit = graphMode === 'alerts' ? '件' : 'dB'
@@ -436,7 +470,44 @@ export default function AnalyticsPage() {
           </ComposedChart>
         </ResponsiveContainer>
       )
-    } else {
+    } else if (graphMode === 'max') {
+      return (
+        <ResponsiveContainer width="100%" height={400}>
+          <ComposedChart data={timeSeriesData}>
+            <defs>
+              <linearGradient id="maxGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#FF6B6B" stopOpacity={0.4}/>
+                <stop offset="95%" stopColor="#FF6B6B" stopOpacity={0.05}/>
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" strokeOpacity={0.5} />
+            <XAxis 
+              dataKey="time" 
+              stroke="#888" 
+              fontSize={11}
+              angle={-45}
+              textAnchor="end"
+              height={60}
+            />
+            <YAxis 
+              stroke="#888" 
+              fontSize={11}
+              label={{ value: '騒音レベル (dB)', angle: -90, position: 'insideLeft', style: { fontSize: 11 } }}
+            />
+            <Tooltip content={<CustomTooltip />} />
+            <Legend />
+            <Area
+              type="monotone"
+              dataKey="max"
+              stroke="#FF6B6B"
+              strokeWidth={2}
+              fill="url(#maxGradient)"
+              name="最大騒音レベル"
+            />
+          </ComposedChart>
+        </ResponsiveContainer>
+      )
+    } else if (graphMode === 'alerts') {
       // アラートモード：デバイス別の積み上げ棒グラフ
       return (
         <ResponsiveContainer width="100%" height={400}>
@@ -485,6 +556,8 @@ export default function AnalyticsPage() {
         </ResponsiveContainer>
       )
     }
+
+    return null
   }
 
   return (
@@ -736,6 +809,15 @@ export default function AnalyticsPage() {
                 >
                   <TrendingDown className="h-4 w-4 mr-2" />
                   平均
+                </Button>
+                <Button
+                  size="sm"
+                  variant={graphMode === 'max' ? 'default' : 'outline'}
+                  onClick={() => setGraphMode('max')}
+                  className={graphMode === 'max' ? 'bg-alsok-blue hover:bg-blue-700' : ''}
+                >
+                  <TrendingUp className="h-4 w-4 mr-2" />
+                  最大
                 </Button>
                 <Button
                   size="sm"

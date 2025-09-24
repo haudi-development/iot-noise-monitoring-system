@@ -184,7 +184,7 @@ export default function AnalyticsPage() {
     return () => {
       controller.abort()
     }
-  }, [startDate, endDate, selectedRealDeviceIds])
+  }, [startDate, endDate, selectedRealDeviceIds, realReadings])
 
   // フィルター対象のデバイスを取得（初期は空）
   const filteredDevices = useMemo(() => {
@@ -215,15 +215,15 @@ export default function AnalyticsPage() {
 
   const timeSeriesData = useMemo(() => {
     const hours = differenceInHours(endDate, startDate)
-    const minutes = differenceInMinutes(endDate, startDate)
+    const minutes = Math.max(1, differenceInMinutes(endDate, startDate))
 
     let intervals: Date[] = []
-    let timeFormat = 'HH:mm'
+    let timeFormat = 'MM/dd'
 
-    if (minutes <= 60) {
-      intervals = eachMinuteOfInterval({ start: startDate, end: endDate }, { step: 5 })
-      timeFormat = 'HH:mm'
-    } else if (hours <= 24) {
+    if (minutes <= 240) {
+      intervals = eachMinuteOfInterval({ start: startDate, end: endDate }, { step: 1 })
+      timeFormat = 'HH:mm:ss'
+    } else if (hours <= 72) {
       intervals = eachMinuteOfInterval({ start: startDate, end: endDate }, { step: 15 })
       timeFormat = 'MM/dd HH:mm'
     } else if (hours <= 168) {
@@ -234,12 +234,12 @@ export default function AnalyticsPage() {
       timeFormat = 'MM/dd'
     }
 
-    const dataMap = new Map<string, any>()
+    const dataMap = new Map<number, any>()
     const ensureEntry = (date: Date) => {
-      const key = format(date, timeFormat)
+      const key = date.getTime()
       let entry = dataMap.get(key)
       if (!entry) {
-        entry = { time: key, __timestamp: date }
+        entry = { time: format(date, timeFormat), __timestamp: date }
         dataMap.set(key, entry)
       }
       return entry
